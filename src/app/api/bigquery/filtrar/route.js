@@ -5,12 +5,25 @@ import bq from '@/lib/bigquery';
 
 export async function POST(req) {
   try {
-    const { filters } = await req.json();
+    const { table: requestTable, filters } = await req.json(); // ✅ DINÁMICO
     const project = 'peak-emitter-350713';
     const dataset = 'FR_Reingresos_output';
+    
+    // Usar tabla dinámica o default
+    const targetTable = requestTable;
+    
+    console.log(`🎯 Filtrando tabla: ${targetTable}`);
 
     const seg_array = filters?.find(f => f.type === 'segmento')?.value || [];
     const ase_array = filters?.find(f => f.type === 'asesor')?.value || [];
+    const cluster_array = filters?.find(f => f.type === 'cluster')?.value || []; // ✅ NUEVO
+    const zona_array = filters?.find(f => f.type === 'zona')?.value || []; // ✅ NUEVO
+    
+    // ✅ OBTENER COLUMNAS DINÁMICAS
+    const seg_column = filters?.find(f => f.type === 'segmento')?.column || 'Segmento';
+    const ase_column = filters?.find(f => f.type === 'asesor')?.column || 'Asesor';
+    const cluster_column = filters?.find(f => f.type === 'cluster')?.column || 'cluster'; // ✅ NUEVO
+    const zona_column = filters?.find(f => f.type === 'zona')?.column || 'zona'; // ✅ NUEVO
 
     // ======================================================
     // ✅ SOLUCIÓN: Construcción dinámica de la consulta
@@ -24,7 +37,7 @@ export async function POST(req) {
       // Si hay filtros, añade la lógica UNNEST y el parámetro
       where_clauses.push(`(
         'Todos' IN UNNEST(@seg) OR
-        b.Segmento IN UNNEST(@seg)
+        b.${seg_column} IN UNNEST(@seg)
       )`);
       params.seg = seg_array;
     } else {
@@ -37,11 +50,33 @@ export async function POST(req) {
       // Si hay filtros, añade la lógica UNNEST y el parámetro
       where_clauses.push(`(
         'Todos' IN UNNEST(@ase) OR
-        b.Asesor IN UNNEST(@ase)
+        b.${ase_column} IN UNNEST(@ase)
       )`);
       params.ase = ase_array;
     } else {
       // Si no hay filtros, la condición es siempre verdadera
+      where_clauses.push('TRUE');
+    }
+
+    // --- Lógica para el filtro de Cluster ---
+    if (cluster_array.length > 0) {
+      where_clauses.push(`(
+        'Todos' IN UNNEST(@cluster) OR
+        b.${cluster_column} IN UNNEST(@cluster)
+      )`);
+      params.cluster = cluster_array;
+    } else {
+      where_clauses.push('TRUE');
+    }
+
+    // --- Lógica para el filtro de Zona ---
+    if (zona_array.length > 0) {
+      where_clauses.push(`(
+        'Todos' IN UNNEST(@zona) OR
+        b.${zona_column} IN UNNEST(@zona)
+      )`);
+      params.zona = zona_array;
+    } else {
       where_clauses.push('TRUE');
     }
 
@@ -56,7 +91,7 @@ export async function POST(req) {
     const sql = `
       WITH base AS (
         SELECT bd_com.*
-        FROM \`${project}.${dataset}.BD_ENVIOS_SAYA_20251103\` bd_com
+        FROM \`${project}.${dataset}.${targetTable}\` bd_com
         LEFT JOIN \`${project}.${dataset}.BD_ReingresosJunto\` bd_dia
           ON CAST(bd_com.ndoc AS STRING) = CAST(bd_dia.Documento AS STRING)
         WHERE bd_dia.Documento IS NULL
@@ -77,10 +112,12 @@ export async function POST(req) {
                N_Doc,
                nombres_fondos AS Nombres,
                Telf_SMS,
-               Segmento,
+               ${seg_column} AS Segmento,
                E_mail,
                Zona,
-               Asesor,
+               ${ase_column} AS Asesor,
+               ${cluster_column} AS Cluster,
+               ${zona_column} AS Zona_Filtro,
                Producto,
                ROW_NUMBER() OVER (PARTITION BY N_Doc ORDER BY cod_asociado) as rn
         FROM filtrado
@@ -93,12 +130,21 @@ export async function POST(req) {
              E_mail AS email,
              Zona,
              Asesor AS gestor,
+             Cluster,
+             Zona_Filtro AS zona_filtro,
              Producto
       FROM ranked_data
       WHERE rn = 1;
     `;
 
     console.log('=== DEBUG FILTRAR API ===');
+    console.log('📊 Tabla objetivo:', targetTable);
+    console.log('📋 Columnas dinámicas:', { 
+      segmento: seg_column, 
+      asesor: ase_column,
+      cluster: cluster_column,
+      zona: zona_column 
+    });
     console.log('Parámetros SQL (dinámicos):', params);
     console.log('Cláusula WHERE generada:', dynamic_where_sql);
 

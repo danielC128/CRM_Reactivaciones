@@ -38,8 +38,12 @@ export default function CampaignPage() {
   // const [linea, setLinea] = useState("");
   const [clientSegments, setClientSegments] = useState([]);//nuevo
   const [asesoresSeleccionados, setAsesoresSeleccionados] = useState([]);//nuevo
+  const [clustersSeleccionados, setClustersSeleccionados] = useState([]); // ✅ NUEVO
+  const [zonasSeleccionadas, setZonasSeleccionadas] = useState([]); // ✅ NUEVO
   const [segments, setSegments] = useState([]);
   const [asesores, setAsesores] = useState([]);
+  const [clusters, setClusters] = useState([]); // ✅ NUEVO  
+  const [zonas, setZonas] = useState([]); // ✅ NUEVO
   const [tipoCampaña, setTipoCampaña] = useState("Fidelizacion");
   const [variable2, setVariable2] = useState("");
   const [sendDate, setSendDate] = useState(null);
@@ -55,10 +59,16 @@ export default function CampaignPage() {
     linea: 'Linea'
   });
   // Datos simulados
-  const [databases, useDatabases] = useState([]);
+  const [databases, setDatabases] = useState([]); // ✅ CAMBIO: useDatabases -> setDatabases
+  const [availableTables, setAvailableTables] = useState([]); // ✅ NUEVO: tablas disponibles
+  const [currentFilterColumns, setCurrentFilterColumns] = useState({ // ✅ NUEVO: columnas actuales para filtros
+    segment: null,
+    asesor: null,
+    cluster: null, // ✅ NUEVO
+    zona: null // ✅ NUEVO
+  });
 
   //const [segments, setSegments] = useState([]);
-  const [clusters, setClusterValues] = useState([]);
   const [strategies, setStrategyValues] = useState([]);
   const [fechaCuotaColumn, setFechaCuotaColumnValues] = useState([]);
   const [lineaValue, setLineaValues] = useState([]);
@@ -72,17 +82,25 @@ export default function CampaignPage() {
     const boot = async () => {
       try {
         setLoadingColumns(true);
-        const [filtRes, initRes] = await Promise.all([
-          //axiosInstance.get("/plantillas"),
-          axiosInstance.get("/bigquery/columns/filtros", { params: { database: "BD_SegmentacionFinal" } }),
-          axiosInstance.get("/bigquery/segmentacionfinal"),
-        ]);
-        //setTemplates(tplRes.data || []);
-        setSegments(filtRes.data.segmentos || []);
-        setAsesores(filtRes.data.asesores || []);
-        setClients(initRes.data.rows || []);
+        
+        // ✅ 1. Cargar tablas disponibles dinámicamente
+        const tablesRes = await axiosInstance.get("/bigquery");
+        const tables = tablesRes.data.tables || [];
+        setAvailableTables(tables);
+        setDatabases(tables.map(t => t.name)); // Para el Autocomplete
+        
+        // ✅ 2. Cargar valores por defecto si hay tabla seleccionada
+        if (selectedDatabase && tables.find(t => t.name === selectedDatabase)) {
+          await loadTableData(selectedDatabase);
+        } else if (tables.length > 0) {
+          // Seleccionar primera tabla disponible
+          const firstTable = tables[0].name;
+          setSelectedDatabase(firstTable);
+          await loadTableData(firstTable);
+        }
+        
       } catch (e) {
-        console.error(e);
+        console.error('❌ Error en boot:', e);
       } finally {
         setLoadingColumns(false);
       }
@@ -98,7 +116,217 @@ export default function CampaignPage() {
     };
     boot();
     fetchTemplates();
-  }, []);
+  }, []); // ✅ Sin selectedDatabase para evitar bucle
+
+  // ✅ NUEVA FUNCIÓN: Cargar datos de tabla dinámicamente
+  const loadTableData = async (tableName) => {
+    try {
+      setLoadingColumns(true);
+      console.log(`🔄 Cargando datos de tabla: ${tableName}`);
+      
+      // 1. Primero obtener esquema de columnas
+      const schemaRes = await axiosInstance.get("/bigquery/columns", {
+        params: { table: tableName }
+      });
+      
+      const availableColumns = schemaRes.data.columns || [];
+      setColumns(availableColumns);
+      
+      console.log('📋 Columnas disponibles:', availableColumns.map(c => c.name));
+      
+      // 2. Buscar columnas comunes para filtros
+      const columnNames = availableColumns.map(c => c.name);
+      const filterColumns = [];
+      
+      console.log('🔍 Todas las columnas disponibles:', columnNames);
+      
+      // Buscar posibles columnas de segmento - AMPLIAR BÚSQUEDA
+      const segmentCols = [
+        'Segmento', 'segmento', 'SEGMENTO', 
+        'segmentacion', 'Segmentacion', 'SEGMENTACION',
+        'segment', 'Segment', 'SEGMENT',
+        'tipo_segmento', 'Tipo_Segmento', 'TIPO_SEGMENTO',
+        'categoria', 'Categoria', 'CATEGORIA',
+        'clasificacion', 'Clasificacion', 'CLASIFICACION'
+      ];
+      const segmentCol = segmentCols.find(col => columnNames.includes(col));
+      if (segmentCol) {
+        filterColumns.push(segmentCol);
+        console.log('✅ Columna de segmento encontrada:', segmentCol);
+      } else {
+        console.log('❌ No se encontró columna de segmento. Buscando en:', segmentCols);
+        console.log('📋 Columnas que SÍ existen:', columnNames);
+      }
+      
+      // Buscar posibles columnas de asesor
+      const asesorCols = [
+        'Asesor', 'asesor', 'ASESOR',
+        'gestor', 'Gestor', 'GESTOR', 
+        'advisor', 'Advisor', 'ADVISOR',
+        'vendedor', 'Vendedor', 'VENDEDOR',
+        'ejecutivo', 'Ejecutivo', 'EJECUTIVO'
+      ];
+      const asesorCol = asesorCols.find(col => columnNames.includes(col));
+      if (asesorCol) {
+        filterColumns.push(asesorCol);
+        console.log('✅ Columna de asesor encontrada:', asesorCol);
+      } else {
+        console.log('❌ No se encontró columna de asesor. Buscando en:', asesorCols);
+      }
+      
+      // Buscar posibles columnas de cluster
+      const clusterCols = [
+        'cluster', 'Cluster', 'CLUSTER',
+        'grupo', 'Grupo', 'GRUPO',
+        'tipo_cluster', 'Tipo_Cluster', 'TIPO_CLUSTER'
+      ];
+      const clusterCol = clusterCols.find(col => columnNames.includes(col));
+      if (clusterCol) {
+        filterColumns.push(clusterCol);
+        console.log('✅ Columna de cluster encontrada:', clusterCol);
+      } else {
+        console.log('❌ No se encontró columna de cluster. Buscando en:', clusterCols);
+      }
+      
+      // Buscar posibles columnas de zona
+      const zonaCols = [
+        'zona', 'Zona', 'ZONA',
+        'region', 'Region', 'REGION',
+        'area', 'Area', 'AREA',
+        'territorio', 'Territorio', 'TERRITORIO'
+      ];
+      const zonaCol = zonaCols.find(col => columnNames.includes(col));
+      if (zonaCol) {
+        filterColumns.push(zonaCol);
+        console.log('✅ Columna de zona encontrada:', zonaCol);
+      } else {
+        console.log('❌ No se encontró columna de zona. Buscando en:', zonaCols);
+      }
+      
+      console.log('🎯 Columnas para filtros encontradas:', filterColumns);
+      
+      // 3. Si no hay columnas para filtros, intentar detectar automáticamente
+      if (filterColumns.length === 0) {
+        console.log('🔍 Intentando detección automática de columnas...');
+        
+        // Buscar columnas con pocos valores únicos (posibles categorías)
+        for (const col of columnNames.slice(0, 10)) { // Solo las primeras 10 para no sobrecargar
+          if (col.toLowerCase().includes('seg') || 
+              col.toLowerCase().includes('tipo') || 
+              col.toLowerCase().includes('categoria') ||
+              col.toLowerCase().includes('clasificacion')) {
+            console.log(`🎯 Detectada posible columna de segmento: ${col}`);
+            filterColumns.push(col);
+            break; // Solo tomar la primera que encuentre
+          }
+        }
+      }
+      
+      // 4. Si hay columnas para filtros, obtener valores únicos
+      if (filterColumns.length > 0) {
+        const valuesRes = await axiosInstance.get("/bigquery/columns", {
+          params: { 
+            table: tableName,
+            columns: filterColumns.join(',') // Solo columnas que existen
+          }
+        });
+        
+        const uniqueValues = valuesRes.data.uniqueValues || {};
+        
+        // Asignar valores únicos a los estados (más inteligente)
+        let segmentValues = [];
+        let asesorValues = [];
+        let clusterValues = [];
+        let zonaValues = [];
+        
+        // Buscar valores de segmento (usar primera columna encontrada)
+        const firstSegmentCol = Object.keys(uniqueValues).find(col => 
+          segmentCol && col === segmentCol || 
+          col.toLowerCase().includes('seg') ||
+          col.toLowerCase().includes('tipo') ||
+          col.toLowerCase().includes('categoria')
+        );
+        if (firstSegmentCol) {
+          segmentValues = uniqueValues[firstSegmentCol] || [];
+        }
+        
+        // Buscar valores de asesor
+        const firstAsesorCol = Object.keys(uniqueValues).find(col => 
+          asesorCol && col === asesorCol ||
+          col.toLowerCase().includes('asesor') ||
+          col.toLowerCase().includes('gestor') ||
+          col.toLowerCase().includes('vendedor')
+        );
+        if (firstAsesorCol) {
+          asesorValues = uniqueValues[firstAsesorCol] || [];
+        }
+        
+        // Buscar valores de cluster
+        const firstClusterCol = Object.keys(uniqueValues).find(col => 
+          clusterCol && col === clusterCol ||
+          col.toLowerCase().includes('cluster') ||
+          col.toLowerCase().includes('grupo')
+        );
+        if (firstClusterCol) {
+          clusterValues = uniqueValues[firstClusterCol] || [];
+        }
+        
+        // Buscar valores de zona
+        const firstZonaCol = Object.keys(uniqueValues).find(col => 
+          zonaCol && col === zonaCol ||
+          col.toLowerCase().includes('zona') ||
+          col.toLowerCase().includes('region') ||
+          col.toLowerCase().includes('area')
+        );
+        if (firstZonaCol) {
+          zonaValues = uniqueValues[firstZonaCol] || [];
+        }
+        
+        setSegments(segmentValues);
+        setAsesores(asesorValues);
+        setClusters(clusterValues);
+        setZonas(zonaValues);
+        
+        // Guardar las columnas que se están usando
+        setCurrentFilterColumns({
+          segment: firstSegmentCol || segmentCol,
+          asesor: firstAsesorCol || asesorCol,
+          cluster: firstClusterCol || clusterCol,
+          zona: firstZonaCol || zonaCol
+        });
+        
+        console.log('✅ Valores únicos cargados:', {
+          segmento: `${firstSegmentCol || segmentCol}: ${segmentValues.length} valores`,
+          asesor: `${firstAsesorCol || asesorCol}: ${asesorValues.length} valores`,
+          cluster: `${firstClusterCol || clusterCol}: ${clusterValues.length} valores`,
+          zona: `${firstZonaCol || zonaCol}: ${zonaValues.length} valores`
+        });
+      } else {
+        console.log('⚠️ No se encontraron columnas de filtro estándar');
+        console.log('📊 Tabla actual:', tableName);
+        console.log('📋 Todas las columnas disponibles:', columnNames);
+        
+        // Mostrar alerta al usuario con las columnas disponibles
+        const columnList = columnNames.join(', ');
+        console.warn(`⚠️ COLUMNAS DISPONIBLES EN ${tableName}: ${columnList}`);
+        
+        setSegments([]);
+        setAsesores([]);
+        setClusters([]);
+        setZonas([]);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error cargando datos de tabla:', error);
+      console.error('Detalles del error:', error.response?.data);
+      setSegments([]);
+      setAsesores([]);
+      setClusters([]);
+      setZonas([]);
+    } finally {
+      setLoadingColumns(false);
+    }
+  };
 
  
   //YOMI
@@ -193,61 +421,21 @@ export default function CampaignPage() {
   };
 
   const handleDatabaseChange = async (event, value) => {
+    if (!value) return;
+    
     setSelectedDatabase(value);
-    setLoadingColumns(true);
-
-    try {
-      const response = await axiosInstance.get("/bigquery/columns", {
-        params: { database: value } // Enviamos el nombre de la base de datos seleccionada);
-      });
-      console.log("Columnas obtenidas:", response.data);
-      setColumns(response.data.columns);
-      console.log("Columnas disponibles:", columns);
-      setLoadingColumns(false);  // Detener el indicador de carga
-
-      handleColumnChange(value);
-    } catch (error) {
-      console.error('Error al obtener las columnas:', error);
-      setLoadingColumns(false);  // Detener el indicador de carga
-
-    }
+    console.log(`🎯 Cambiando a tabla: ${value}`);
+    
+    // Limpiar datos anteriores
+    setClients([]);
+    setClientSegments([]);
+    setAsesoresSeleccionados([]);
+    setClustersSeleccionados([]);
+    setZonasSeleccionadas([]);
+    
+    // Cargar nuevos datos
+    await loadTableData(value);
   };
-  const handleColumnChange = async (value) => {
-    /*setSelectedColumns({
-      ...selectedColumns,
-      [filterType]: value
-    });*/
-    setLoadingColumns(true);
-    try {
-      const response = await axiosInstance.get("/bigquery/columns/filtros", {
-        params: {
-          database: value,
-          segmentColumn: "segmentacion",
-          clusterColumn: "Cluster",
-          estrategiaColumn: "gestion",
-          fechaCuotaColumn: "Fec_Venc_Cuota",
-          lineaColumn: "Linea"
-        }  // Enviamos los nombres de las columnas seleccionadas
-      });
-      console.log("Valores únicos obtenidos:", response.data);
-
-      setSegments(response.data.segmentos);
-      setClusterValues(response.data.clusters);
-      setStrategyValues(response.data.estrategias);
-      setFechaCuotaColumnValues(response.data.fechaCuotaColumn);
-      setLineaValues(response.data.lineas);
-      /*setColumnValues({
-        segmento: response.data.segmentos,
-        cluster: response.data.clusters,
-        estrategia: response.data.estrategias
-      });*/
-      setLoadingColumns(false);  // Detener el indicador de carga
-    } catch (error) {
-      console.error("Error al obtener los valores únicos:", error);
-      setLoadingColumns(false);  // Detener el indicador de carga en caso de error
-    }
-  };
-
   // Colores base para usar en estilos
   const colors = {
     primaryBlue: "#007391",
@@ -259,24 +447,61 @@ export default function CampaignPage() {
 
   
     const applyFilters = async () => {
-      try {//nuevo
+      if (!selectedDatabase) {
+        alert('Por favor selecciona una tabla primero');
+        return;
+      }
+      
+      try {
         setLoadingColumns(true);
+        console.log(`🔍 Aplicando filtros en tabla: ${selectedDatabase}`);
+        
         const filters = [];
-        if (clientSegments.length > 0) {
-          filters.push({ type: 'segmento', value: clientSegments });
+        if (clientSegments.length > 0 && currentFilterColumns.segment) {
+          filters.push({ 
+            type: 'segmento', 
+            value: clientSegments,
+            column: currentFilterColumns.segment // ✅ Columna real
+          });
         }
-        if (asesoresSeleccionados.length > 0) {
-          filters.push({ type: 'asesor', value: asesoresSeleccionados });
+        if (asesoresSeleccionados.length > 0 && currentFilterColumns.asesor) {
+          filters.push({ 
+            type: 'asesor', 
+            value: asesoresSeleccionados,
+            column: currentFilterColumns.asesor // ✅ Columna real  
+          });
         }
-        const { data } = await axiosInstance.post('/bigquery/filtrar', { filters });
+        if (clustersSeleccionados.length > 0 && currentFilterColumns.cluster) {
+          filters.push({ 
+            type: 'cluster', 
+            value: clustersSeleccionados,
+            column: currentFilterColumns.cluster // ✅ NUEVO
+          });
+        }
+        if (zonasSeleccionadas.length > 0 && currentFilterColumns.zona) {
+          filters.push({ 
+            type: 'zona', 
+            value: zonasSeleccionadas,
+            column: currentFilterColumns.zona // ✅ NUEVO
+          });
+        }
+        
+        // ✅ ENVIAR TABLA DINÁMICAMENTE
+        const { data } = await axiosInstance.post('/bigquery/filtrar', { 
+          table: selectedDatabase, // ✅ NUEVO: tabla dinámica
+          filters 
+        });
+        
         const rows = data.rows || [];
         setClients(rows);
+        console.log(`✅ Clientes obtenidos: ${rows.length}`);
+        
       } catch (e) {
-        console.error(e);
+        console.error('❌ Error aplicando filtros:', e);
         alert('Ocurrió un problema al aplicar los filtros');
       } finally {
         setLoadingColumns(false);
-      }//termina nuevo
+      }
     };
 
 
@@ -288,8 +513,9 @@ export default function CampaignPage() {
     { field: 'nombre', headerName: 'Nombres', width: 200 },
     { field: 'celular', headerName: 'Teléfono', width: 150 },
     { field: 'Segmento', headerName: 'Segmento', width: 150 },
+    { field: 'Cluster', headerName: 'Cluster', width: 120 },
+    { field: 'zona_filtro', headerName: 'Zona', width: 120 },
     { field: 'email', headerName: 'Correo', width: 220 },
-    { field: 'Zona', headerName: 'Zona', width: 120 },
     { field: 'gestor', headerName: 'Asesor', width: 180 },
     { field: 'Producto', headerName: 'Producto', width: 180 },
   ];
@@ -378,6 +604,25 @@ export default function CampaignPage() {
 
           
           <Typography variant="h6" sx={{ /* ...estilos... */ }}>Segmentación</Typography>
+          
+          {/* 🐛 DEBUG: Mostrar columnas disponibles */}
+          {columns.length > 0 && (
+            <Box sx={{ mb: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                🔍 DEBUG - Columnas disponibles en {selectedDatabase}:
+              </Typography>
+              <Typography variant="body2" sx={{ fontSize: '0.8em' }}>
+                {columns.map(c => c.name).join(', ')}
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1, fontSize: '0.8em', color: 'green' }}>
+                ✅ Filtros activos: {currentFilterColumns.segment ? `Segmento: ${currentFilterColumns.segment}` : '❌ Sin segmento'} | 
+                {currentFilterColumns.asesor ? ` Asesor: ${currentFilterColumns.asesor}` : ' ❌ Sin asesor'} |
+                {currentFilterColumns.cluster ? ` Cluster: ${currentFilterColumns.cluster}` : ' ❌ Sin cluster'} |
+                {currentFilterColumns.zona ? ` Zona: ${currentFilterColumns.zona}` : ' ❌ Sin zona'}
+              </Typography>
+            </Box>
+          )}
+          
           <Grid container spacing={4} mb={5}>
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth>
@@ -418,6 +663,50 @@ export default function CampaignPage() {
                       sx={asesoresSeleccionados.includes(a) ? { bgcolor: '#0677f8ff', color: '#020202ff', fontWeight: 'bold' } : {}}
                     >
                       {a}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth>
+                <InputLabel>Cluster</InputLabel>
+                <Select
+                  multiple
+                  value={clustersSeleccionados}
+                  onChange={e => setClustersSeleccionados(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                  label="Cluster"
+                  renderValue={selected => selected.join(', ')}
+                >
+                  {clusters.map(cluster => (
+                    <MenuItem
+                      key={cluster}
+                      value={cluster}
+                      sx={clustersSeleccionados.includes(cluster) ? { bgcolor: '#0677f8ff', color: '#020202ff', fontWeight: 'bold' } : {}}
+                    >
+                      {cluster}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth>
+                <InputLabel>Zona</InputLabel>
+                <Select
+                  multiple
+                  value={zonasSeleccionadas}
+                  onChange={e => setZonasSeleccionadas(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                  label="Zona"
+                  renderValue={selected => selected.join(', ')}
+                >
+                  {zonas.map(zona => (
+                    <MenuItem
+                      key={zona}
+                      value={zona}
+                      sx={zonasSeleccionadas.includes(zona) ? { bgcolor: '#0677f8ff', color: '#020202ff', fontWeight: 'bold' } : {}}
+                    >
+                      {zona}
                     </MenuItem>
                   ))}
                 </Select>

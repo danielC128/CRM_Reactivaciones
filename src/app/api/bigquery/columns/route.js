@@ -112,27 +112,92 @@ export async function GET(req) {
   try {
     const url = new URL(req.url);
     const projectId = 'peak-emitter-350713';
-    const datasetId = 'FR_Reingresos_output';   // <-- CAMBIO
-    const tableName = 'BD_Conglomerado_con_clusters';
+    const datasetId = 'FR_Reingresos_output';
+    const tableName = url.searchParams.get('table'); // ✅ DINÁMICO
+    const columnsParam = url.searchParams.get('columns'); // Para obtener valores únicos
 
+    if (!tableName) {
+      return new Response(JSON.stringify({ 
+        message: '❌ Se requiere el parámetro "table"',
+        example: '/api/bigquery/columns?table=BD_ENVIOS_SAYA_20251103'
+      }), { status: 400, headers: { 'Content-Type': 'application/json' }});
+    }
+
+    // Verificar que la tabla existe
     const [tables] = await bigquery.dataset(datasetId).getTables();
     const tableNames = tables.map(t => t.id);
     if (!tableNames.includes(tableName)) {
-      return new Response(JSON.stringify({ message: `❌ La tabla "${tableName}" no existe en "${datasetId}"` }), { status: 404, headers: { 'Content-Type': 'application/json' }});
+      return new Response(JSON.stringify({ 
+        message: `❌ La tabla "${tableName}" no existe`,
+        availableTables: tableNames
+      }), { status: 404, headers: { 'Content-Type': 'application/json' }});
     }
 
+    // Obtener esquema de la tabla
     const [table] = await bigquery.dataset(datasetId).table(tableName).getMetadata();
     if (!table?.schema?.fields) {
-      return new Response(JSON.stringify({ message: `❌ No se pudo obtener el esquema de "${tableName}"` }), { status: 500, headers: { 'Content-Type': 'application/json' }});
+      return new Response(JSON.stringify({ 
+        message: `❌ No se pudo obtener esquema de "${tableName}"` 
+      }), { status: 500, headers: { 'Content-Type': 'application/json' }});
     }
 
-    const columnAttributes = table.schema.fields.map(f => ({ name: f.name, type: f.type, mode: f.mode }));
+    const columnAttributes = table.schema.fields.map(f => ({ 
+      name: f.name, 
+      type: f.type, 
+      mode: f.mode 
+    }));
+
+    // Si se solicitan valores únicos de columnas específicas
+    let uniqueValues = {};
+    if (columnsParam) {
+      const columns = columnsParam.split(',').map(c => c.trim());
+      console.log(`🔍 Buscando valores únicos para columnas: ${columns.join(', ')}`);
+      console.log(`📋 Columnas disponibles en tabla: ${columnAttributes.map(c => c.name).join(', ')}`);
+      
+      for (const col of columns) {
+        const columnExists = columnAttributes.find(c => c.name === col);
+        if (columnExists) {
+          try {
+            const query = `
+              SELECT DISTINCT ${col} as value 
+              FROM \`${projectId}.${datasetId}.${tableName}\`
+              WHERE ${col} IS NOT NULL 
+              ORDER BY value 
+              LIMIT 1000
+            `;
+            
+            console.log(`📊 Ejecutando query para ${col}:`, query);
+            const [rows] = await bigquery.query(query);
+            uniqueValues[col] = rows.map(row => row.value);
+            console.log(`✅ ${col}: ${uniqueValues[col].length} valores únicos encontrados`);
+          } catch (err) {
+            console.error(`❌ Error obteniendo valores de ${col}:`, err.message);
+            uniqueValues[col] = [];
+          }
+        } else {
+          console.log(`⚠️ Columna "${col}" no existe en la tabla`);
+          uniqueValues[col] = [];
+        }
+      }
+    }
+
+    console.log(`✅ Columnas obtenidas de ${tableName}:`, columnAttributes.length);
+    if (Object.keys(uniqueValues).length > 0) {
+      console.log('✅ Valores únicos obtenidos:', Object.keys(uniqueValues));
+    }
+
     return new Response(JSON.stringify({
-      message: '✅ Atributos obtenidos correctamente',
+      message: '✅ Datos obtenidos correctamente',
+      table: tableName,
       columns: columnAttributes,
+      uniqueValues: uniqueValues,
       availableTables: tableNames
     }), { status: 200, headers: { 'Content-Type': 'application/json' }});
   } catch (error) {
-    return new Response(JSON.stringify({ message: '❌ Error al obtener las columnas', error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' }});
+    console.error('❌ Error en /api/bigquery/columns:', error);
+    return new Response(JSON.stringify({ 
+      message: '❌ Error al obtener datos de columnas', 
+      error: error.message 
+    }), { status: 500, headers: { 'Content-Type': 'application/json' }});
   }
 }

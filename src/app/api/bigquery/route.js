@@ -55,16 +55,27 @@ import bigquery from '@/lib/bigquery';
 export async function GET() {
   try {
     const projectId = 'peak-emitter-350713';
-    const datasetId = 'FR_Reingresos_output';   // <-- CAMBIO
+    const datasetId = 'FR_Reingresos_output';
 
     const [tables] = await bigquery.dataset(datasetId).getTables();
-    const tableNames = tables.map(t => t.id);
+    const tableData = tables.map(t => ({
+      id: t.id,
+      name: t.id,
+      fullName: `${projectId}.${datasetId}.${t.id}`
+    }));
+
+    console.log('✅ Tablas disponibles:', tableData.map(t => t.name));
 
     return new Response(JSON.stringify({
       message: '✅ Consulta exitosa a BigQuery',
-      tables: tableNames,
+      tables: tableData,
+      count: tableData.length
     }), { status: 200, headers: { 'Content-Type': 'application/json' }});
   } catch (error) {
-    return new Response(JSON.stringify({ message: '❌ Fallo al conectar a BigQuery', error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' }});
+    console.error('❌ Error obteniendo tablas:', error);
+    return new Response(JSON.stringify({ 
+      message: '❌ Fallo al obtener tablas de BigQuery', 
+      error: error.message 
+    }), { status: 500, headers: { 'Content-Type': 'application/json' }});
   }
 }
