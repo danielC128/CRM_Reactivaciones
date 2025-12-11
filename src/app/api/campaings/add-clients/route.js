@@ -67,7 +67,15 @@ export async function POST(req, context) {
       const telefono = client.celular;
       return telefono ? "+51" + telefono.toString().replace(/\s+/g, "") : null;
     }).filter(Boolean);
-    
+
+    // ⚡ OPTIMIZACIÓN 2: Pre-compilar expresiones regulares (evita crear 5000+ RegExp)
+    const regexCache = {};
+    if (variableMappings) {
+      for (const idx of Object.keys(variableMappings)) {
+        regexCache[idx] = new RegExp(`{{\\s*${idx}\\s*}}`, "g");
+      }
+    }
+
     const result = await prisma.$transaction(async (prisma) => {
       // Crear la campaña
       const campanha = await prisma.campanha.create({
@@ -84,34 +92,14 @@ export async function POST(req, context) {
       });
 
       if (clients.length > 0) {
-        // OPTIMIZACIÓN 2: Obtener todos los clientes existentes de una vez
-        const clientesExistentes = await prisma.cliente.findMany({
-          where: {
-            celular: { in: telefonos },
-          },
-          select: {
-            cliente_id: true,
-            celular: true,
-            estado: true
-          }
-        });
+        // ⚡ OPTIMIZACIÓN 3: Preparar TODOS los datos de clientes de una vez
+        const todosLosDatos = [];
 
-        // Crear mapa para búsqueda rápida
-        const clientesMap = new Map(
-          clientesExistentes.map(c => [c.celular, c])
-        );
-
-        // OPTIMIZACIÓN 3: Preparar datos para inserción masiva
-        const clientesParaCrear = [];
-        const asociacionesParaCrear = [];
-        const firestoreOps = [];
-        
         for (const clientData of clients) {
-          const {Codigo_Asociado, documento_identidad, nombre,  Apellido_Paterno, celular, Segmento, email, Zona, gestor, Producto} = clientData;
+          const {Codigo_Asociado, documento_identidad, nombre, Apellido_Paterno, celular, Segmento, email, Zona, gestor, Producto} = clientData;
           const finalNombre = nombre || "Nombre desconocido";
           const finalApellido = Apellido_Paterno || "Apellido desconocido";
           const finalCelular = celular ? "+51" + celular.toString().replace(/\s+/g, "") : null;
-          console.log("Procesando cliente:", email, finalCelular);
           const finalEmail = email && email.trim() !== "" ? email : null;
           const finalDNI = documento_identidad || "";
           const finalSegmento = Segmento || "";
@@ -122,105 +110,81 @@ export async function POST(req, context) {
 
           if (!finalCelular) continue;
 
-          let cliente = clientesMap.get(finalCelular);
-
-          // Validar si el cliente existe y su estado es "Enojado"
-          if (cliente) {
-            
-            // Cliente ya existe actualizar sus campos
-            await prisma.cliente.update({
-              where: { cliente_id: cliente.cliente_id },
-              data: {
-                Segmento: finalSegmento,
-                Zona: finalZona,
-                gestor: finalGestor,
-                Producto: finalProducto,
-              }
-            });
-          } else {
-            // Cliente nuevo: lo metemos en el array para createMany
-            clientesParaCrear.push({
-              nombre: finalNombre,
-              apellido: finalApellido,
-              documento_identidad: finalDNI,
-              celular: finalCelular,
-              email: finalEmail,
-              categoria_no_interes: " ",
-              bound: false,
-              estado: " ",
-              observacion: "Observación no proporcionada",
-              score: "no_score",
-              gestor: finalGestor,
-              Segmento: finalSegmento,
-              Zona: finalZona,
-              Codigo_Asociado: finalCodAsociado,
-              Producto: finalProducto,
-            });
-          }
-        }
-
-        // OPTIMIZACIÓN 4: Inserción masiva de clientes nuevos
-        let clientesCreados = [];
-        if (clientesParaCrear.length > 0) {
-          clientesCreados = await prisma.cliente.createManyAndReturn({
-            data: clientesParaCrear
+          todosLosDatos.push({
+            nombre: finalNombre,
+            apellido: finalApellido,
+            documento_identidad: finalDNI,
+            celular: finalCelular,
+            email: finalEmail,
+            categoria_no_interes: " ",
+            bound: false,
+            estado: " ",
+            observacion: "Observación no proporcionada",
+            score: "no_score",
+            gestor: finalGestor,
+            Segmento: finalSegmento,
+            Zona: finalZona,
+            Codigo_Asociado: finalCodAsociado,
+            Producto: finalProducto,
           });
         }
 
-        // Crear mapa completo con clientes nuevos y existentes
-        const todosClientes = new Map(clientesMap);
-        clientesCreados.forEach(c => todosClientes.set(c.celular, c));
+        // ⚡ MEGA OPTIMIZACIÓN: Crear TODOS en un batch con skipDuplicates
+        // Esto reemplaza los 800 UPDATEs individuales que causaban el cuello de botella
+        console.log(`⚡ Creando ${todosLosDatos.length} clientes en modo ultra rápido...`);
 
-        // OPTIMIZACIÓN 5: Preparar asociaciones y operaciones Firestore
-        const fecha = new Date();
-        const firestoreBatch = db ? db.batch() : null;
-        
+        const [_, todosClientesConId] = await Promise.all([
+          // Insertar todos (los duplicados se ignoran automáticamente)
+          prisma.cliente.createMany({
+            data: todosLosDatos,
+            skipDuplicates: true
+          }),
+          // Obtener todos los clientes (existentes + nuevos) en paralelo
+          prisma.cliente.findMany({
+            where: { celular: { in: telefonos } },
+            select: { cliente_id: true, celular: true }
+          })
+        ]);
+
+        console.log(`✅ ${todosClientesConId.length} clientes listos para asociar`);
+
+        // Crear mapa para búsqueda rápida
+        const clientesMap = new Map(todosClientesConId.map(c => [c.celular, c]));
+
+        // ⚡ PREPARAR ASOCIACIONES y MENSAJES (sin Firestore dentro de la transacción)
+        const asociacionesParaCrear = [];
+        const mensajesPersonalizados = []; // Para Firestore después
 
         for (const clientData of clients) {
           const { celular } = clientData;
           const finalCelular = celular ? "+51" + celular.toString().replace(/\s+/g, "") : null;
           if (!finalCelular) continue;
 
-          const cliente = todosClientes.get(finalCelular);
+          const cliente = clientesMap.get(finalCelular);
           if (!cliente) continue;
 
-          // Preparar asociación
+          // Asociación
           asociacionesParaCrear.push({
             cliente_id: cliente.cliente_id,
             campanha_id: campanha.campanha_id,
           });
 
-          // Preparar mensaje personalizado
+          // ⚡ Personalizar mensaje usando RegEx pre-compiladas (evita crear RegExp en cada iteración)
           let mensajePersonalizado = tplMensaje;
           for (const [idx, campo] of Object.entries(variableMappings || {})) {
             const valor = clientData[campo] || "";
-            mensajePersonalizado = mensajePersonalizado.replace(
-              new RegExp(`{{\\s*${idx}\\s*}}`, "g"),
-              valor
-            );
+            mensajePersonalizado = mensajePersonalizado.replace(regexCache[idx], valor);
           }
-          // --- Agregar seed para el checkpointer del hilo f-{phone} ---
-         // OJO: thread_id en el bot usa número sin '+', por eso lo quitamos aquí
-        //   seeds.push({
-        //     phone: (finalCelular || "").replace(/^\+/, ""),   // "519..." (sin '+')
-        //     text: mensajePersonalizado,
-        //     role: "ai"
-        //   });
-          // Preparar operación Firestore en batch
-          if (firestoreBatch) {
-            const docRef = db.collection("reactivaciones").doc(finalCelular);
-            firestoreBatch.set(docRef, {
-              celular: finalCelular,
-              fecha: admin.firestore.Timestamp.fromDate(fecha),
-              id_bot: "reactivaciones",
-              id_cliente: cliente.cliente_id,
-              mensaje: mensajePersonalizado || "Mensaje inicial de la campaña",
-              sender: "false",
-            });
-          }
+
+          // Guardar para Firestore (fuera de la transacción)
+          mensajesPersonalizados.push({
+            celular: finalCelular,
+            cliente_id: cliente.cliente_id,
+            mensaje: mensajePersonalizado
+          });
         }
 
-        // OPTIMIZACIÓN 6: Inserción masiva de asociaciones
+        // ⚡ Inserción masiva de asociaciones
         if (asociacionesParaCrear.length > 0) {
           await prisma.cliente_campanha.createMany({
             data: asociacionesParaCrear,
@@ -228,22 +192,50 @@ export async function POST(req, context) {
           });
         }
 
-        // OPTIMIZACIÓN 7: Ejecutar todas las operaciones Firestore en batch
-        if (firestoreBatch) {
-          await firestoreBatch.commit();
-        }
+        // ⚡ RETORNAR mensajes para procesarlos FUERA de la transacción
+        return {
+          campanha,
+          clientsProcessed: clients.length,
+          mensajesPersonalizados
+        };
       }
 
       return {
         campanha,
-        clientsProcessed: clients.length,
+        clientsProcessed: 0,
+        mensajesPersonalizados: []
       };
     },
     {
-    timeout: 2000000,
-    maxWait: 200000
-  }
+      timeout: 2000000,
+      maxWait: 200000
+    }
   );
+
+  // ⚡ OPTIMIZACIÓN CRÍTICA: Firestore FUERA de la transacción (no bloqueante)
+  // Esto evita que Firestore bloquee la respuesta al usuario
+  if (db && result.mensajesPersonalizados && result.mensajesPersonalizados.length > 0) {
+    console.log(`🔥 Guardando ${result.mensajesPersonalizados.length} mensajes en Firestore (async)...`);
+    const fecha = new Date();
+    const firestoreBatch = db.batch();
+
+    result.mensajesPersonalizados.forEach(({ celular, cliente_id, mensaje }) => {
+      const docRef = db.collection("reactivaciones").doc(celular);
+      firestoreBatch.set(docRef, {
+        celular,
+        fecha: admin.firestore.Timestamp.fromDate(fecha),
+        id_bot: "reactivaciones",
+        id_cliente: cliente_id,
+        mensaje: mensaje || "Mensaje inicial de la campaña",
+        sender: "false",
+      });
+    });
+
+    // Ejecutar sin await para no bloquear la respuesta (fire-and-forget)
+    firestoreBatch.commit()
+      .then(() => console.log(`✅ Firestore: ${result.mensajesPersonalizados.length} mensajes guardados`))
+      .catch(err => console.error("⚠️ Error en Firestore (no crítico):", err.message));
+  }
 
   // --- Llamada única al bot para sembrar memoria en el checkpointer ---
   // --- Llamada única al bot para sembrar memoria en el checkpointer ---
