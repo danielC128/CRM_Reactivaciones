@@ -89,9 +89,7 @@ model cliente {
   codigo_pago                  codigo_pago[]
   conversacion                 conversacion[]
   historico_estado             historico_estado[]
-  historico_motivo             historico_motivo[]
   historico_observacion        historico_observacion[]
-  historico_score              historico_score[]
   leadh                        leadh[]
   pago                         pago[]
 }
@@ -150,23 +148,6 @@ model historico_estado {
   fecha_estado        DateTime? @default(now()) @db.Timestamp(6)
   detalle             String?
   cliente             cliente   @relation(fields: [cliente_id], references: [cliente_id], onDelete: Cascade, onUpdate: NoAction, map: "historico_estado_ibfk_1")
-}
-
-model historico_motivo {
-  historico_motivo_id Int       @id @default(autoincrement())
-  cliente_id          Int
-  motivo              String    @db.VarChar(20)
-  fecha_cambio        DateTime? @default(now()) @db.Timestamp(6)
-  detalle             String?
-  cliente             cliente   @relation(fields: [cliente_id], references: [cliente_id], onDelete: Cascade, onUpdate: NoAction, map: "historico_motivo_ibfk_1")
-}
-
-model historico_score {
-  historico_score_id Int       @id @default(autoincrement())
-  cliente_id         Int
-  score              String    @db.VarChar(20)
-  fecha_cambio       DateTime? @default(now()) @db.Timestamp(6)
-  cliente            cliente   @relation(fields: [cliente_id], references: [cliente_id], onDelete: Cascade, onUpdate: NoAction, map: "historico_score_ibfk_1")
 }
 
 model leadh {

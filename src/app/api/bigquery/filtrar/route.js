@@ -22,8 +22,12 @@ export async function POST(req) {
     // ✅ OBTENER COLUMNAS DINÁMICAS
     const seg_column = filters?.find(f => f.type === 'segmento')?.column || 'Segmento';
     const ase_column = filters?.find(f => f.type === 'asesor')?.column || 'Asesor';
-    const cluster_column = filters?.find(f => f.type === 'cluster')?.column || 'cluster'; // ✅ NUEVO
-    const zona_column = filters?.find(f => f.type === 'zona')?.column || 'zona'; // ✅ NUEVO
+    const cluster_column = filters?.find(f => f.type === 'cluster')?.column || null; // ✅ NUEVO
+    const zona_column = filters?.find(f => f.type === 'zona')?.column || null; // ✅ NUEVO
+
+    // Expresiones seguras para SELECT (si la columna no existe, devolvemos NULL)
+    const cluster_select = cluster_column ? `b.${cluster_column}` : 'NULL';
+    const zona_select = zona_column ? `b.${zona_column}` : 'NULL';
 
     // ======================================================
     // ✅ SOLUCIÓN: Construcción dinámica de la consulta
@@ -60,6 +64,9 @@ export async function POST(req) {
 
     // --- Lógica para el filtro de Cluster ---
     if (cluster_array.length > 0) {
+      if (!cluster_column) {
+        throw new Error('No se encontró columna para cluster en la tabla seleccionada');
+      }
       where_clauses.push(`(
         'Todos' IN UNNEST(@cluster) OR
         b.${cluster_column} IN UNNEST(@cluster)
@@ -71,6 +78,9 @@ export async function POST(req) {
 
     // --- Lógica para el filtro de Zona ---
     if (zona_array.length > 0) {
+      if (!zona_column) {
+        throw new Error('No se encontró columna para zona en la tabla seleccionada');
+      }
       where_clauses.push(`(
         'Todos' IN UNNEST(@zona) OR
         b.${zona_column} IN UNNEST(@zona)
@@ -109,17 +119,17 @@ export async function POST(req) {
       ),
       ranked_data AS (
         SELECT cod_asociado,
-               N_Doc,
+               ndoc AS N_Doc,
                nombres_fondos AS Nombres,
                Telf_SMS,
                ${seg_column} AS Segmento,
                E_mail,
-               Zona,
+               ${zona_select} AS Zona,
                ${ase_column} AS Asesor,
-               ${cluster_column} AS Cluster,
-               ${zona_column} AS Zona_Filtro,
+               ${cluster_select} AS Cluster,
+               ${zona_select} AS Zona_Filtro,
                Producto,
-               ROW_NUMBER() OVER (PARTITION BY N_Doc ORDER BY cod_asociado) as rn
+               ROW_NUMBER() OVER (PARTITION BY ndoc ORDER BY cod_asociado) as rn
         FROM filtrado
       )
       SELECT cod_asociado AS Codigo_Asociado,
