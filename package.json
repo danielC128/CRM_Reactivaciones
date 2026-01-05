@@ -36,7 +36,7 @@
     "framer-motion": "^12.5.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.13.1",
-    "next": "^15.5.4",
+    "next": "^16.1.1",
     "next-auth": "^4.24.11",
     "p-map": "^7.0.3",
     "prisma": "^6.4.1",
@@ -56,4 +56,3 @@
     "typescript": "^5.7.3"
   }
 }
-
