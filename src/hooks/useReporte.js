@@ -28,7 +28,6 @@ const useReporte = () => {
         sortModel
       );
   
-      console.log("🔹 Datos recibidos:", data);
   
       if (!data || !data.estados) {
         throw new Error("Datos de API vacíos o incorrectos");
@@ -44,7 +43,6 @@ const useReporte = () => {
     }
   };
 
-  console.log("🔹 estadosData en el hook:", estadosData);
 
   const reporteConPorcentajes = useMemo(() => {
     if (!estadosData || totalEstadosData === 0) return [];
@@ -86,3 +84,7 @@ const useReporte = () => {
 };
 
 export default useReporte;
+
+
+
+

@@ -1,5 +1,5 @@
 // pages/api/clients/by-gestor.js
-import { prisma } from "@/lib/prisma"; // Asegúrate de tener esto configurado
+import prisma from "@/lib/prisma"; // Asegúrate de tener esto configurado
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
@@ -27,3 +27,4 @@ export default async function handler(req, res) {
 
   return res.status(405).json({ error: "Método no permitido" });
 }
+

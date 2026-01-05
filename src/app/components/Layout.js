@@ -42,14 +42,15 @@ export default function Layout({ children }) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(true); // Control de la barra lateral
   const { data: session, status } = useSession();
   const router = useRouter();
-
   useEffect(() => {
-    console.log("Estado de la sesión:", session);
-    if (session) {
-      console.log("Usuario logueado:", session.user);
-      console.log("Rol del usuario:", session.user.role);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Estado de la sesion:", session);
+      if (session) {
+        console.log("Usuario logueado:", session.user);
+        console.log("Rol del usuario:", session.user.role);
+      }
     }
-  }, [session]); // Se ejecutará cuando session cambie
+  }, [session]); // Se ejecutara cuando session cambie
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -64,7 +65,6 @@ export default function Layout({ children }) {
   };
 
   const isAdmin = session?.user?.rol === "admin" || session?.user?.rol === "admin_general";
-  console.log("Rol", session?.user?.rol)
 
   const drawer = (
     <Box
@@ -385,3 +385,6 @@ export default function Layout({ children }) {
     </Box>
   );
 }
+
+
+
