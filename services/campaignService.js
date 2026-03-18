@@ -24,16 +24,6 @@ export const createCampaign = async (campaignData) => {
   });
 };
 
-export const uploadClients = async (campaignId, file) => {
-  const formData = new FormData();
-  formData.append("archivo", file);
-
-  return await axiosInstance.post(`/campaings/${campaignId}/cargar-clientes`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-  });
-};
-
-
 export const sendCampaign = async (campaignId) => {
     return await axiosInstance.post(`${API_URL}/${campaignId}/enviar`);
 };

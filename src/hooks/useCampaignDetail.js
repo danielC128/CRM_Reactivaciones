@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import {
   getCampaignById,
   removeClientFromCampaign,
-  uploadClients,
   sendCampaignMessages
 } from "../../services/campaignService";
 import { Snackbar, Alert } from "@mui/material";
@@ -71,10 +70,6 @@ const useCampaignDetail = (id) => {
     },
     handleRemoveClient: async (clientId) => {
       await removeClientFromCampaign(id, clientId);
-      fetchCampaignDetail();
-    },
-    handleUploadClients: async (file) => {
-      await uploadClients(id, file);
       fetchCampaignDetail();
     },
     handleSendCampaign: async () => {
