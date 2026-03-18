@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { writeFile } from "fs/promises";
-import path from "path";
-import client from "@/lib/twilio";
 
 
 export async function GET(req) {
@@ -87,32 +84,6 @@ export async function PATCH(req) {
     } catch (error) {
         console.error(error);
         return NextResponse.json({ error: "Error al cargar clientes" }, { status: 500 });
-    }
-}
-
-// 📌 Enviar campaña
-export async function PUT(req) {
-    try {
-        const { id } = req.query;
-        const campanha = await prisma.campanha.findUnique({
-            where: { campanha_id: parseInt(id) },
-            include: { cliente_campanha: { include: { cliente: true } }, template: true },
-        });
-
-        if (!campanha) return NextResponse.json({ error: "Campaña no encontrada" }, { status: 404 });
-
-        for (const clienteCampanha of campanha.cliente_campanha) {
-            await client.messages.create({
-                from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-                to: `whatsapp:${clienteCampanha.cliente.celular}`,
-                body: campanha.mensaje_cliente,
-            });
-        }
-
-        return NextResponse.json({ message: "Mensajes enviados" });
-    } catch (error) {
-        console.error(error);
-        return NextResponse.json({ error: "Error al enviar la campaña" }, { status: 500 });
     }
 }
 
