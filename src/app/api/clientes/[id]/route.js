@@ -14,7 +14,7 @@ export async function GET(req, context) {
 
     const id = parseInt(params.id); // 🔹 Convertir a número
 
-    // 🔍 Buscar cliente por ID en MySQL con Prisma
+    // 🔍 Buscar cliente por ID en PostgreSQL con Prisma
     const cliente = await prisma.cliente.findUnique({
       where: { cliente_id: id },
     });
@@ -40,7 +40,7 @@ export async function PUT(req, context) {
     const { id } = params;
     const { estado, accion, gestor, observaciones, fechaPromesaPago, motivo} = await req.json();
 
-    // ✅ Actualizar el cliente en MySQL
+    // ✅ Actualizar el cliente en PostgreSQL
     const updatedCliente = await prisma.cliente.update({
       where: { cliente_id: parseInt(id) },
       data: {

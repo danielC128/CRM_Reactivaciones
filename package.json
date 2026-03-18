@@ -36,7 +36,6 @@
     "firebase-admin": "^13.5.0",
     "framer-motion": "^12.5.0",
     "jsonwebtoken": "^9.0.2",
-    "mongodb": "^6.13.1",
     "next": "^16.0.10",
     "next-auth": "^4.24.11",
     "p-map": "^7.0.3",

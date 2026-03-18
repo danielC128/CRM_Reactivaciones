@@ -1,48 +1,42 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
-import { MongoClient } from "mongodb";
 require("dotenv").config();
-
-const uri = process.env.DATABASE_URL_MONGODB;
-const clientPromise = new MongoClient(uri).connect();
 
 export async function POST(req, context) {
     try {
-      console.log("⚡ ULTRA FAST MODE: Iniciando carga...");
+      console.log("📌 Iniciando carga de clientes...");
       const startTime = Date.now();
-  
-      // 🚀 FIX Next.js: Await params primero
+
       const { params } = context;
       const resolvedParams = await params;
-      
+
       if (!resolvedParams || !resolvedParams.id) {
         console.error("❌ Error: ID de campaña no válido");
         return NextResponse.json({ error: "ID de campaña no válido" }, { status: 400 });
       }
-  
+
       const campanhaId = Number(resolvedParams.id);
       if (isNaN(campanhaId)) {
         console.error("❌ Error: El ID de la campaña no es un número válido");
         return NextResponse.json({ error: "El ID de la campaña no es un número válido" }, { status: 400 });
       }
-  
+
       console.log(`✅ ID de campaña recibido: ${campanhaId}`);
-  
+
       const formData = await req.formData();
       const file = formData.get("archivo");
-  
+
       if (!file) {
         console.error("❌ Error: No se proporcionó ningún archivo");
         return NextResponse.json({ error: "No se proporcionó ningún archivo" }, { status: 400 });
       }
-  
+
       console.log(`📌 Archivo recibido: ${file.name}`);
-  
+
       const buffer = Buffer.from(await file.arrayBuffer());
       let clientes = [];
-  
+
       if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
         console.log("📌 Procesando archivo Excel...");
         const workbook = XLSX.read(buffer, { type: "buffer" });
@@ -53,124 +47,135 @@ export async function POST(req, context) {
         console.error("❌ Error: Formato de archivo no válido");
         return NextResponse.json({ error: "Formato de archivo no válido. Debe ser .xlsx o .csv" }, { status: 400 });
       }
-  
+
       if (clientes.length === 0) {
         console.error("❌ Error: El archivo está vacío o tiene formato incorrecto");
         return NextResponse.json({ error: "El archivo está vacío o no tiene formato válido" }, { status: 400 });
       }
-  
+
       console.log(`📌 Clientes cargados desde archivo: ${clientes.length} registros`);
 
-      // 🚀 ULTRA OPTIMIZACIÓN: Normalizar y filtrar clientes válidos de una vez
-      const clientesValidos = clientes
-        .filter(cliente => cliente.Numero && cliente.Nombre)
+      // Normalizar todos los números de una vez
+      const clientesNormalizados = clientes
+        .filter(c => c.Numero && c.Nombre)
         .map(cliente => {
           let numero = String(cliente.Numero).trim();
           if (!numero.startsWith("+51")) {
             numero = `+51${numero}`;
           }
           return {
-            numero,
-            nombre: cliente.Nombre,
-            asesor: cliente.Asesor
+            ...cliente,
+            celularNormalizado: numero
           };
         });
 
-      if (clientesValidos.length === 0) {
-        return NextResponse.json({ error: "No hay clientes válidos en el archivo" }, { status: 400 });
+      if (clientesNormalizados.length === 0) {
+        console.warn("⚠️ No hay clientes válidos para procesar");
+        return NextResponse.json({
+          message: "No hay clientes válidos en el archivo",
+          clientes: []
+        });
       }
 
-      console.log(`⚡ MODO ULTRA RAPIDO: ${clientesValidos.length} clientes`);
+      const celulares = clientesNormalizados.map(c => c.celularNormalizado);
+      console.log(`📊 Total de clientes a procesar: ${celulares.length}`);
 
-      // 🚀 ULTRA VELOCIDAD: Sin verificaciones, operaciones masivas directas
-      const mongoClient = await clientPromise;
-      const db = mongoClient.db(process.env.MONGODB_DB);
+      // Traer todos los clientes existentes en UN SOLO query
+      console.log("🔍 Consultando clientes existentes en PostgreSQL...");
+      const existingClientes = await prisma.cliente.findMany({
+        where: { celular: { in: celulares } }
+      });
+      const clientesMap = new Map(existingClientes.map(c => [c.celular, c]));
+      console.log(`✅ Encontrados ${existingClientes.length} clientes existentes en PostgreSQL`);
 
-      // 1️⃣ MEGA BATCH: Crear TODOS los clientes de una vez (sin chunks)
-      const todosLosDatos = clientesValidos.map(cliente => ({
-        celular: cliente.numero,
-        nombre: cliente.nombre,
-        documento_identidad: "",
-        tipo_documento: "Desconocido",
-        estado: "no contactado",
-        gestor: cliente.asesor || ""
-      }));
+      // Crear nuevos clientes en PostgreSQL con createMany (batch)
+      const nuevosClientes = clientesNormalizados
+        .filter(c => !clientesMap.has(c.celularNormalizado))
+        .map(c => ({
+          celular: c.celularNormalizado,
+          nombre: c.Nombre,
+          documento_identidad: "",
+          tipo_documento: "Desconocido",
+          estado: "no contactado",
+          gestor: c.Asesor || null
+        }));
 
-      console.log(`🔥 Creando ${todosLosDatos.length} clientes en MySQL...`);
-      
-      // 2️⃣ OBTENER IDs y OPERACIONES MASIVAS EN PARALELO
-      const [_, todosClientesConId] = await Promise.all([
-        // Crear clientes en MySQL
-        prisma.cliente.createMany({
-          data: todosLosDatos,
-          skipDuplicates: true
-        }),
-        // Obtener todos los IDs de una vez (después de crear)
-        prisma.cliente.findMany({
-          where: { celular: { in: clientesValidos.map(c => c.numero) } },
-          select: { cliente_id: true, celular: true, nombre: true, gestor: true }
-        }).then(async (clientes) => {
-          // 3️⃣ MIENTRAS OBTENEMOS IDs, PREPARAR OPERACIONES MONGO
-          const operacionesMongo = clientes.map(cliente => ({
-            updateOne: {
-              filter: { celular: cliente.celular },
-              update: {
-                $setOnInsert: {
-                  id_cliente: `cli_${cliente.cliente_id}`,
-                  nombre: cliente.nombre,
-                  celular: cliente.celular,
-                  correo: "",
-                  conversaciones: []
-                }
-              },
-              upsert: true
-            }
-          }));
+      let clientesCreados = [];
+      if (nuevosClientes.length > 0) {
+        console.log(`🔹 Creando ${nuevosClientes.length} nuevos clientes en PostgreSQL...`);
+        try {
+          await prisma.cliente.createMany({
+            data: nuevosClientes,
+            skipDuplicates: true
+          });
 
-          const todasLasRelaciones = clientes.map(cliente => ({
+          // Volver a consultar para obtener los IDs
+          clientesCreados = await prisma.cliente.findMany({
+            where: { celular: { in: nuevosClientes.map(c => c.celular) } }
+          });
+
+          // Actualizar el mapa
+          clientesCreados.forEach(c => clientesMap.set(c.celular, c));
+          console.log(`✅ ${clientesCreados.length} clientes creados en PostgreSQL`);
+        } catch (err) {
+          console.error("❌ Error al crear clientes en PostgreSQL:", err);
+        }
+      }
+
+      // Consultar relaciones cliente_campanha existentes en UN SOLO query
+      const clienteIds = Array.from(clientesMap.values()).map(c => c.cliente_id);
+      console.log("🔍 Consultando relaciones cliente-campaña existentes...");
+      const existingRelaciones = await prisma.cliente_campanha.findMany({
+        where: {
+          cliente_id: { in: clienteIds },
+          campanha_id: campanhaId
+        }
+      });
+      const relacionesSet = new Set(existingRelaciones.map(r => r.cliente_id));
+      console.log(`✅ Encontradas ${existingRelaciones.length} relaciones existentes`);
+
+      // Crear relaciones cliente_campanha con createMany (batch)
+      const nuevasRelaciones = clienteIds
+        .filter(id => !relacionesSet.has(id))
+        .map(id => ({
+          cliente_id: id,
+          campanha_id: campanhaId
+        }));
+
+      if (nuevasRelaciones.length > 0) {
+        console.log(`🔹 Creando ${nuevasRelaciones.length} nuevas relaciones cliente-campaña...`);
+        try {
+          await prisma.cliente_campanha.createMany({
+            data: nuevasRelaciones,
+            skipDuplicates: true
+          });
+          console.log(`✅ ${nuevasRelaciones.length} relaciones creadas`);
+        } catch (err) {
+          console.error("❌ Error al crear relaciones:", err);
+        }
+      }
+
+      // Construir resultado final
+      const clientesProcesados = [];
+      clientesNormalizados.forEach(c => {
+        const cliente = clientesMap.get(c.celularNormalizado);
+        if (cliente) {
+          clientesProcesados.push({
             cliente_id: cliente.cliente_id,
-            campanha_id: campanhaId
-          }));
-
-          // 4️⃣ EJECUTAR TODO EN PARALELO EXTREMO
-          console.log(`🚀 Ejecutando operaciones masivas finales...`);
-          await Promise.all([
-            // MongoDB con configuración ultra rápida
-            operacionesMongo.length > 0 
-              ? db.collection("clientes").bulkWrite(operacionesMongo, { 
-                  ordered: false,
-                  writeConcern: { w: 0, j: false } // Sin journaling para máxima velocidad
-                })
-              : Promise.resolve(),
-            
-            // Relaciones con skipDuplicates
-            prisma.cliente_campanha.createMany({
-              data: todasLasRelaciones,
-              skipDuplicates: true
-            })
-          ]);
-
-          return clientes;
-        })
-      ]);
+            nombre: cliente.nombre,
+            celular: cliente.celular,
+            gestor: cliente.gestor
+          });
+        }
+      });
 
       const endTime = Date.now();
       const totalTime = (endTime - startTime) / 1000;
 
-      console.log(`⚡ ULTRA VELOCIDAD completada en ${totalTime} segundos!`);
+      console.log(`✅ Carga de clientes completada con éxito. Total procesados: ${clientesProcesados.length} en ${totalTime}s`);
 
-      // 5️⃣ Preparar respuesta
-      const clientesProcesados = todosClientesConId.map(cliente => ({
-        cliente_id: cliente.cliente_id,
-        nombre: cliente.nombre,
-        celular: cliente.celular,
-        gestor: cliente.gestor
-      }));
-
-      console.log(`✅ Carga completada: ${clientesProcesados.length} clientes en ${totalTime}s`);
-  
       return NextResponse.json({
-        message: `${clientesProcesados.length} clientes procesados en ${totalTime} segundos`,
+        message: `Clientes procesados con éxito en la campaña ${campanhaId}`,
         clientes: clientesProcesados,
         tiempoTotal: `${totalTime}s`
       });
@@ -180,7 +185,7 @@ export async function POST(req, context) {
     }
   }
 
-// 🔹 Obtener clientes de una campaña
+// Obtener clientes de una campaña
 export async function GET(req, { params }) {
   try {
     const resolvedParams = await params;
@@ -195,7 +200,7 @@ export async function GET(req, { params }) {
   }
 }
 
-// 🔹 Eliminar cliente de campaña
+// Eliminar cliente de campaña
 export async function DELETE(req, { params }) {
   try {
     const resolvedParams = await params;

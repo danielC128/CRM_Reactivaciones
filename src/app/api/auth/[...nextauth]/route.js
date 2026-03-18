@@ -15,7 +15,7 @@
 //         try {
 //           console.log("🔍 Autenticando usuario:", credentials.username);
 
-//           // 🔹 Buscar usuario en MySQL
+//           // 🔹 Buscar usuario en PostgreSQL
 //           const usuario = await prisma.usuario.findUnique({
 //             where: { username: credentials.username },
 //             include: { rol: true },
