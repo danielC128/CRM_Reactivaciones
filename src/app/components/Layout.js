@@ -330,7 +330,7 @@ export default function Layout({ children }) {
           <Box sx={{ display: "flex", alignItems: "center", flexGrow: 1 }}>
             {/* Imagen al lado del texto */}
             <img
-              src="https://maquimas.pe/wp-content/themes/maquisistema/img/common/maquiplus-logo.png"
+              src="/logo_maqui.png"
               alt="Logo"
               style={{ height: 40, marginRight: 10 }}
             />

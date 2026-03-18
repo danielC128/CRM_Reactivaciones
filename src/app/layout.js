@@ -6,7 +6,7 @@ export const metadata = {
   title: "Maqui+",
   description: "Descripción de tu aplicación",
   icons: {
-    icon: "https://maquimas.pe/wp-content/themes/maquisistema/img/common/maquiplus-logo.png"
+    icon: "/logo_maqui.png"
   }
 };
 

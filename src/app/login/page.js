@@ -39,7 +39,7 @@ export default function LoginPage() {
         {/* Logo de Maquiplus */}
         <div className="flex justify-center mb-6">
           <img
-            src="https://maquimas.pe/wp-content/themes/maquisistema/img/common/maquiplus-logo.png"
+            src="/logo_maqui.png"
             alt="Maquiplus Logo"
             className="h-12 md:h-16 object-contain"
           />
